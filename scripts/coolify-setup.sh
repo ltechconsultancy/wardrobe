@@ -62,7 +62,6 @@ else
             \"git_repository\": \"$GIT_REPO\",
             \"git_branch\": \"$GIT_BRANCH\",
             \"build_pack\": \"dockerfile\",
-            \"dockerfile_location\": \"/Dockerfile\",
             \"ports_exposes\": \"$PORT\",
             \"domains\": \"$DOMAIN\",
             \"health_check_enabled\": true,
@@ -86,19 +85,29 @@ LIST=$(curl -sS -H "$AUTH" "$BASE_URL/applications/$APP_UUID/storages" 2>/dev/nu
 if ! printf '%s' "$LIST" | python3 -c "
 import json,sys
 raw=sys.stdin.read()
-data=json.loads(raw) if raw.strip() else []
+try:
+    data=json.loads(raw) if raw.strip() else []
+except json.JSONDecodeError:
+    sys.exit(1)
 items=data if isinstance(data,list) else data.get('storages', data.get('data', []))
 for s in items:
     if s.get('mount_path') == '$MOUNT_PATH':
         sys.exit(0)
 sys.exit(1)
 " 2>/dev/null; then
-    curl -sS -X POST "$BASE_URL/applications/$APP_UUID/storages" \
+    RESP=$(curl -sS -w "\nHTTP:%{http_code}" -X POST "$BASE_URL/applications/$APP_UUID/storages" \
         -H "$AUTH" \
         -H "Content-Type: application/json" \
-        -d "{\"type\":\"persistent\",\"name\":\"$VOLUME_NAME\",\"mount_path\":\"$MOUNT_PATH\"}"
-    echo ""
-    echo "Storage created."
+        -d "{\"type\":\"persistent\",\"name\":\"$VOLUME_NAME\",\"mount_path\":\"$MOUNT_PATH\"}")
+    HTTP=$(printf '%s' "$RESP" | tail -1 | sed 's/HTTP://')
+    BODY=$(printf '%s' "$RESP" | sed '$d')
+    if [ "$HTTP" = "201" ] || [ "$HTTP" = "200" ]; then
+        echo "Storage created."
+    else
+        echo "Storage API unavailable ($HTTP). Add manually in Coolify UI:"
+        echo "  Persistent Storages → name=$VOLUME_NAME, mount path=$MOUNT_PATH"
+        echo "$BODY"
+    fi
 else
     echo "Storage already mounted."
 fi
