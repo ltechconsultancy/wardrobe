@@ -1,0 +1,11 @@
+# Coolify environment (bartluttels.nl)
+# Paste in Coolify → Application → Environment → Developer view
+
+OPENAI_API_KEY=
+OPENAI_VISION_MODEL=gpt-5.4-mini
+OPENAI_IMAGE_MODEL=gpt-image-2
+OPENAI_IMAGE_QUALITY=high
+WARDROBE_DATA_DIR=/app/data
+WARDROBE_MODEL_REFERENCE=/app/data/model-reference.png
+PORT=4173
+NODE_ENV=production
