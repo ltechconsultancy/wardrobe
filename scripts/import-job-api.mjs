@@ -497,6 +497,15 @@ export function wardrobeImportApi(options = {}) {
       if (url.pathname === "/api/import/config" && req.method === "GET") {
         return json(res, 200, await setupStatus());
       }
+      if (url.pathname === "/api/import/model-reference" && req.method === "POST") {
+        const input = await body(req, 8 * 1024 * 1024);
+        const { data } = decodeImage(input);
+        const referenceSetting = setting("WARDROBE_MODEL_REFERENCE", "data/model-reference.png");
+        const referencePath = path.resolve(root, referenceSetting);
+        await mkdir(path.dirname(referencePath), { recursive: true });
+        await writeFile(referencePath, await normalizeImage(data));
+        return json(res, 200, { ok: true, ...(await setupStatus()) });
+      }
       const wardrobeDeleteMatch = url.pathname.match(/^\/api\/import\/wardrobe\/(import-[a-f0-9-]{36})$/i);
       if (wardrobeDeleteMatch && req.method === "DELETE") {
         const id = wardrobeDeleteMatch[1];
