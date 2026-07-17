@@ -1,0 +1,38 @@
+# Coolify deployment for Wardrobe (persistent /app/data volume)
+#
+# Coolify settings:
+#   Build Pack: Docker Compose
+#   Compose file: /docker-compose.yaml
+#   Domain: https://wardrobe.bartluttels.nl
+#   Port: 4173
+
+services:
+  wardrobe:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    networks:
+      - coolify
+      - default
+    volumes:
+      - wardrobe-data:/app/data
+    environment:
+      NODE_ENV: production
+      PORT: 4173
+      WARDROBE_DATA_DIR: /app/data
+      WARDROBE_MODEL_REFERENCE: /app/data/model-reference.png
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-gpt-5.4-mini}
+      OPENAI_IMAGE_MODEL: ${OPENAI_IMAGE_MODEL:-gpt-image-2}
+      OPENAI_IMAGE_QUALITY: ${OPENAI_IMAGE_QUALITY:-high}
+      WARDROBE_AUTH_USER: ${WARDROBE_AUTH_USER:-wardrobe}
+      WARDROBE_AUTH_PASSWORD: ${WARDROBE_AUTH_PASSWORD:-}
+    restart: unless-stopped
+
+volumes:
+  wardrobe-data:
+    name: wardrobe-data
+
+networks:
+  coolify:
+    external: true
