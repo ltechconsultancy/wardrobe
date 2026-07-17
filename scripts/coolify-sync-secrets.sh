@@ -82,6 +82,14 @@ upsert_env "WARDROBE_AUTH_USER" "$AUTH_USER" true
 upsert_env "WARDROBE_AUTH_PASSWORD" "$WARDROBE_AUTH_PASSWORD" false
 
 echo ""
+echo "=== Sync OpenAI image model settings (cost-optimized) ==="
+upsert_env "OPENAI_VISION_MODEL" "${OPENAI_VISION_MODEL:-gpt-5.4-mini}" true
+upsert_env "OPENAI_IMAGE_MODEL" "${OPENAI_IMAGE_MODEL:-gpt-image-2}" true
+upsert_env "OPENAI_IMAGE_QUALITY" "${OPENAI_IMAGE_QUALITY:-medium}" true
+upsert_env "OPENAI_IMAGE_SIZE_GARMENT" "${OPENAI_IMAGE_SIZE_GARMENT:-1024x1024}" true
+upsert_env "OPENAI_IMAGE_SIZE_MODELED" "${OPENAI_IMAGE_SIZE_MODELED:-1024x1024}" true
+
+echo ""
 echo "=== Disable Coolify proxy auth (app handles auth) ==="
 curl -sS -X PATCH "$BASE_URL/applications/$APP_UUID" \
     -H "$AUTH" \
