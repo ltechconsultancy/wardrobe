@@ -4,6 +4,7 @@ import "./import-flow.css";
 
 const API = "/api/import/jobs";
 const CONFIG_API = "/api/import/config";
+const SETTINGS_API = "/api/import/settings";
 const PARTS = [
   ["upperbody", "Tops"],
   ["wholebody_up", "Jackets"],
@@ -146,6 +147,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState(null);
   const [setup, setSetup] = useState(null);
+  const [savingQuality, setSavingQuality] = useState(false);
 
   useEffect(() => {
     api(CONFIG_API).then(setSetup).catch((requestError) => setSetup({ ready: false, error: requestError.message }));
@@ -157,6 +159,21 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved }) {
       })
       .catch(() => {});
   }, []);
+
+  const updateImageQuality = useCallback(async (imageQuality) => {
+    setSavingQuality(true);
+    setError("");
+    try {
+      const next = await api(SETTINGS_API, { method: "PATCH", body: JSON.stringify({ imageQuality }) });
+      setSetup((current) => ({ ...current, ...next }));
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSavingQuality(false);
+    }
+  }, []);
+
+  const selectedQuality = setup?.imageQualityOptions?.find((option) => option.id === setup?.imageQuality);
 
   const refresh = useCallback(async (id) => {
     try {
@@ -278,6 +295,24 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved }) {
       <div className="import-popover-backdrop" data-open={open} onMouseDown={(event) => event.target === event.currentTarget && setOpen(false)}>
         <section className="import-popover" role="dialog" aria-modal="true" aria-labelledby="import-title">
           <header className="import-popover__header"><div><p className="import-popover__eyebrow">Wardrobe import</p><h2 className="import-popover__title" id="import-title">{readyCount ? `${readyCount} ready for review` : activeStatus?.tone === "error" ? "Import needs attention" : jobs.length ? "Preparing new pieces" : notice?.text || "Add to your wardrobe"}</h2></div><button className="import-icon-button" type="button" onClick={() => setOpen(false)} aria-label="Close import progress"><X size={20} /></button></header>
+          {setup?.ready && (
+            <div className="import-quality-bar">
+              <div className="import-field import-quality-field">
+                <label htmlFor="import-image-quality">Image quality</label>
+                <select
+                  id="import-image-quality"
+                  value={setup.imageQuality || "medium"}
+                  disabled={savingQuality}
+                  onChange={(event) => updateImageQuality(event.target.value)}
+                >
+                  {(setup.imageQualityOptions || []).map((option) => (
+                    <option value={option.id} key={option.id}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+              <p className="import-quality-hint">{selectedQuality?.costHint || "Applies to the next garment and modeled generations."} Quality is saved for this wardrobe.</p>
+            </div>
+          )}
           {!jobs.length ? setupRequired ? <div className="import-drop-target import-setup-warning"><WarningCircle size={30} /><h2>Setup required</h2><p>Add your OpenAI API key to <code>.env</code> and a PNG reference photo of yourself at <code>{setup.modelReference || "data/model-reference.png"}</code>, then restart the app.</p></div> : <div className="import-drop-target"><UploadSimple size={28} /><h2>{notice ? "Try another image" : "Choose or paste an image"}</h2><p>{notice?.detail || "We’ll isolate each clothing item, suggest its details, and hold everything for your approval."}</p><button className="import-button import-button--primary" disabled={!setup?.ready} onClick={() => { setNotice(null); inputRef.current?.click(); }}>Choose images</button></div> : (
             <>
               <div className={`import-progress${activeStatus?.tone !== "processing" ? " is-reviewing" : progress < 100 ? " is-indeterminate" : ""}`}><div className="import-progress__meta"><span>{activeStatus?.text}</span><span>{jobs.length} {jobs.length === 1 ? "item" : "items"}</span></div>{activeStatus?.tone === "processing" && <div className="import-progress__track"><div className="import-progress__bar" style={{ "--import-progress": `${progress}%` }} /></div>}</div>

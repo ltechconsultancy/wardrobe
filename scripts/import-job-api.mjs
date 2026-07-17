@@ -10,6 +10,12 @@ const STAGES = new Set(["crop", "garment", "modeled"]);
 const DECISIONS = new Set(["approve", "reject"]);
 const PARTS = new Set(["upperbody", "wholebody_up", "lowerbody", "accessories_up", "shoes"]);
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+const IMAGE_QUALITIES = new Set(["low", "medium", "high"]);
+const IMAGE_QUALITY_OPTIONS = [
+  { id: "low", label: "Low", costHint: "~$0.08 per item" },
+  { id: "medium", label: "Medium", costHint: "~$0.22 per item" },
+  { id: "high", label: "High", costHint: "~$0.63 per item" },
+];
 
 function json(res, status, value) {
   res.statusCode = status;
@@ -345,9 +351,31 @@ export function wardrobeImportApi(options = {}) {
   let jobsDir;
   let importedFile;
   let libraryAssetDir;
+  let settingsFile;
   const running = new Map();
   const setting = (name, fallback = "") => options.env?.[name] || process.env[name] || fallback;
   const apiBaseUrl = () => setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1").replace(/\/$/, "");
+
+  async function loadSettings() {
+    try {
+      const data = JSON.parse(await readFile(settingsFile, "utf8"));
+      return data && typeof data === "object" && !Array.isArray(data) ? data : {};
+    } catch (error) {
+      if (error.code === "ENOENT") return {};
+      throw error;
+    }
+  }
+
+  function resolveImageQuality(settings = {}) {
+    const fromUser = typeof settings.imageQuality === "string" ? settings.imageQuality.toLowerCase() : "";
+    if (IMAGE_QUALITIES.has(fromUser)) return fromUser;
+    const fromEnv = setting("OPENAI_IMAGE_QUALITY", "medium").toLowerCase();
+    return IMAGE_QUALITIES.has(fromEnv) ? fromEnv : "medium";
+  }
+
+  async function currentImageQuality() {
+    return resolveImageQuality(await loadSettings());
+  }
 
   async function setupStatus() {
     const hasApiKey = Boolean(setting("OPENAI_API_KEY").trim());
@@ -359,11 +387,14 @@ export function wardrobeImportApi(options = {}) {
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
+    const imageQuality = await currentImageQuality();
     return {
       ready: hasApiKey && hasModelReference,
       hasApiKey,
       hasModelReference,
       modelReference: referenceSetting,
+      imageQuality,
+      imageQualityOptions: IMAGE_QUALITY_OPTIONS,
     };
   }
 
@@ -436,13 +467,14 @@ export function wardrobeImportApi(options = {}) {
         const output = path.join(dir, `${stageName}-${stage.attempts}.png`);
         const key = setting("OPENAI_API_KEY");
         if (!key) throw new Error("OPENAI_API_KEY is not configured");
+        const imageQuality = await currentImageQuality();
         const sourceFile = stageName === "garment" && current.internal.cropFile ? current.internal.cropFile : current.internal.originalFile;
         const original = { data: await readFile(path.join(dir, sourceFile)), mime: "image/png", name: sourceFile };
         let bytes;
         if (stageName === "garment") {
           chromaKeyUsed = chooseChromaKey(current.metadata.color);
           const basePrompt = options.garmentPrompt || buildGarmentPrompt(current.metadata, chromaKeyUsed);
-          bytes = await openAIEdit({ key, baseUrl: apiBaseUrl(), model: setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", "gpt-image-2")), quality: setting("OPENAI_IMAGE_QUALITY", "medium"), size: setting("OPENAI_IMAGE_SIZE_GARMENT", "1024x1024"), images: [original], prompt: current.stages.garment.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.garment.prompt}` : basePrompt });
+          bytes = await openAIEdit({ key, baseUrl: apiBaseUrl(), model: setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", "gpt-image-2")), quality: imageQuality, size: setting("OPENAI_IMAGE_SIZE_GARMENT", "1024x1024"), images: [original], prompt: current.stages.garment.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.garment.prompt}` : basePrompt });
           const rawName = `${stageName}-${stage.attempts}-source.png`;
           await writeFile(path.join(dir, rawName), bytes);
           failedAssetUrl = `${ASSET_ROOT}/${current.id}/${rawName}`;
@@ -463,7 +495,7 @@ export function wardrobeImportApi(options = {}) {
           }
           const model = { data: modelData, mime: "image/png", name: "model.png" };
           const basePrompt = options.modeledPrompt || "Create a professional horizontal 3:2 editorial fashion photograph of the person in Image 1 wearing the exact garment from Image 2. Preserve the person's recognizable identity, face, hair, age and proportions. Preserve every garment color, material, fit, construction, graphic, logo and distinctive detail. Keep the complete featured item clearly visible and unobstructed, use understated neutral supporting clothes, realistic anatomy, natural light, authentic fabric, a tasteful real-world setting, and leave environmental space around the model. No text, watermark, product mockup, or synthetic appearance.";
-          bytes = await openAIEdit({ key, baseUrl: apiBaseUrl(), model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", "gpt-image-2")), quality: setting("OPENAI_IMAGE_QUALITY", "medium"), size: setting("OPENAI_IMAGE_SIZE_MODELED", "1024x1024"), images: [model, garment], prompt: current.stages.modeled.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.modeled.prompt}` : basePrompt });
+          bytes = await openAIEdit({ key, baseUrl: apiBaseUrl(), model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", "gpt-image-2")), quality: imageQuality, size: setting("OPENAI_IMAGE_SIZE_MODELED", "1024x1024"), images: [model, garment], prompt: current.stages.modeled.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.modeled.prompt}` : basePrompt });
         }
         await writeFile(output, bytes);
         const fresh = await loadJob(current.id);
@@ -496,6 +528,17 @@ export function wardrobeImportApi(options = {}) {
       }
       if (url.pathname === "/api/import/config" && req.method === "GET") {
         return json(res, 200, await setupStatus());
+      }
+      if (url.pathname === "/api/import/settings" && req.method === "PATCH") {
+        const input = await body(req, 4096);
+        const imageQuality = typeof input.imageQuality === "string" ? input.imageQuality.toLowerCase() : "";
+        if (!IMAGE_QUALITIES.has(imageQuality)) {
+          throw Object.assign(new Error("imageQuality must be low, medium, or high"), { status: 400 });
+        }
+        const settings = await loadSettings();
+        settings.imageQuality = imageQuality;
+        await atomicJson(settingsFile, settings);
+        return json(res, 200, { ok: true, ...(await setupStatus()) });
       }
       if (url.pathname === "/api/import/model-reference" && req.method === "POST") {
         const input = await body(req, 8 * 1024 * 1024);
@@ -679,6 +722,7 @@ export function wardrobeImportApi(options = {}) {
       jobsDir = path.join(dataDir, "jobs");
       importedFile = path.join(dataDir, "library.json");
       libraryAssetDir = path.join(dataDir, "imported");
+      settingsFile = path.join(dataDir, "settings.json");
       await mkdir(jobsDir, { recursive: true });
       await mkdir(libraryAssetDir, { recursive: true });
       const ids = await readdir(jobsDir).catch(() => []);
